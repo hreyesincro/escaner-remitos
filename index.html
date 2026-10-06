@@ -32,11 +32,19 @@
   #linterna{background:#38485c;flex:0 0 auto;padding:16px 14px;display:none}
   #sinVentana{display:none;margin:12px 14px;padding:12px;border-radius:10px;background:#3d2f0a;border:1px solid var(--naranja);font-size:15px}
   #sinVentana b{font-size:20px;letter-spacing:.5px}
+  #disparo{display:none;position:absolute;left:50%;bottom:14px;transform:translateX(-50%);width:76px;height:76px;border-radius:50%;background:#fff;border:6px solid rgba(255,255,255,.45);box-shadow:0 0 0 3px #0d1520 inset}
+  #disparo:active{transform:translateX(-50%) scale(.92)}
+  #disparo:disabled{opacity:.35}
+  .ft{position:relative;width:74px;height:74px;border-radius:8px;overflow:hidden;border:1px solid #33475f}
+  .ft img{width:100%;height:100%;object-fit:cover;display:block}
+  .ft button{position:absolute;top:2px;right:2px;width:26px;height:26px;border-radius:50%;border:0;background:rgba(181,43,39,.92);color:#fff;font-size:15px;font-weight:bold;padding:0}
+  body.fotos #guia{display:none}
+  body.fotos #disparo{display:block}
 </style>
 </head>
 <body>
-<header><b>Escáner de remitos · INCRO</b><small>Acercá el celular hasta que el QR (abajo a la derecha del remito) llene el cuadro. Podés leer varios seguidos.</small></header>
-<div id="zona"><video id="video" playsinline muted autoplay></video><div id="guia"></div><div id="flash"></div>
+<header><b id="hTit">Escáner de remitos · INCRO</b><small id="hSub">Acercá el celular hasta que el QR (abajo a la derecha del remito) llene el cuadro. Podés leer varios seguidos.</small></header>
+<div id="zona"><video id="video" playsinline muted autoplay></video><div id="guia"></div><div id="flash"></div><button type="button" id="disparo" aria-label="Sacar foto"></button>
   <div id="zoom"><button type="button" data-z="1">1×</button><button type="button" data-z="2">2×</button><button type="button" data-z="3">3×</button></div></div>
 <div id="estado">Abriendo la cámara…</div>
 <div id="diag"></div>
@@ -50,7 +58,9 @@
 <script>
 (function(){
   'use strict';
-  var TIPO='incro-qr', leidos=[], stream=null, track=null, detector=null, corriendo=false, ultimo={t:'',ts:0}, linternaOn=false, cuadros=0, motorUltimo='';
+  var P=new URLSearchParams(location.search), FOTOS=P.get('modo')==='fotos';
+  var MAXF=Math.max(1,Math.min(30,+P.get('max')||10)), PXF=Math.max(400,Math.min(2400,+P.get('px')||1024)), QF=Math.max(0.3,Math.min(0.95,+P.get('q')||0.6));
+  var TIPO=FOTOS?'incro-fotos':'incro-qr', leidos=[], stream=null, track=null, detector=null, corriendo=false, ultimo={t:'',ts:0}, linternaOn=false, cuadros=0, motorUltimo='';
   var $=function(i){ return document.getElementById(i); };
   var video=$('video'), cv=document.createElement('canvas'), cx=cv.getContext('2d',{willReadFrequently:true});
   var JSQR_URLS=['https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js','https://unpkg.com/jsqr@1.4.0/dist/jsQR.js'];
@@ -69,6 +79,13 @@
       var sc=document.createElement('script'); sc.src=JSQR_URLS[i++]; sc.onload=function(){ window.jsQR?res(true):prueba(); }; sc.onerror=prueba; document.head.appendChild(sc); })(); });
   }
   function pintar(){
+    if(FOTOS){
+      $('lista').innerHTML=leidos.map(function(u,i){ return '<span class="ft"><img src="'+u+'" alt=""><button type="button" data-i="'+i+'" aria-label="Borrar">✕</button></span>'; }).join('');
+      $('listo').disabled=!leidos.length; $('listo').textContent=leidos.length?'Listo ('+leidos.length+') ›':'Listo ›';
+      $('disparo').disabled=leidos.length>=MAXF;
+      if(corriendo) avisar(leidos.length>=MAXF?'Llegaste al máximo de '+MAXF+' fotos. Tocá "Listo".':(leidos.length?leidos.length+' de '+MAXF+' fotos. Tocá el botón blanco para sacar otra, o "Listo".':'Tocá el botón blanco para cada foto (hasta '+MAXF+'). Después tocá "Listo".'));
+      return;
+    }
     $('lista').innerHTML=leidos.map(function(n,i){ return '<span class="chip">'+n+'<button type="button" data-i="'+i+'" aria-label="Quitar">✕</button></span>'; }).join('');
     $('listo').disabled=!leidos.length;
     $('listo').textContent=leidos.length?'Listo ('+leidos.length+') ›':'Listo ›';
@@ -92,6 +109,17 @@
     try{ navigator.vibrate && navigator.vibrate(120); }catch(e){}
     avisar('✔ Remito '+n+' leído. Apuntá al siguiente o tocá "Listo".');
   }
+
+  function sacarFoto(){
+    if(!corriendo || leidos.length>=MAXF) return;
+    var w=video.videoWidth, h=video.videoHeight; if(!w||!h) return;
+    var k=Math.min(1,PXF/Math.max(w,h)), c=document.createElement('canvas'); c.width=Math.round(w*k); c.height=Math.round(h*k);
+    c.getContext('2d').drawImage(video,0,0,c.width,c.height);
+    leidos.push(c.toDataURL('image/jpeg',QF)); destello(); pitido(1500);
+    try{ navigator.vibrate && navigator.vibrate(40); }catch(e){}
+    pintar(); var l=$('lista'); l.scrollLeft=l.scrollWidth;
+  }
+  $('disparo').onclick=sacarFoto;
 
   // jsQR sobre una zona del cuadro: k=1 recorte central (lo que está dentro del marco, a resolución completa), k=0 cuadro entero reducido
   function leerJsQR(recorte){
@@ -129,6 +157,7 @@
     z.onclick=function(e){ var b=e.target.closest('button[data-z]'); if(!b) return;
       track.applyConstraints({advanced:[{zoom:Math.min(cap.zoom.max,+b.dataset.z)}]}).catch(function(){});
       Array.prototype.forEach.call(z.querySelectorAll('button'),function(x){ x.className=x===b?'on':''; }); };
+    if(FOTOS){ z.querySelector('[data-z="1"]').className='on'; return; }
     if(cap.zoom.max>=2){ try{ track.applyConstraints({advanced:[{zoom:2}]}); z.querySelector('[data-z="2"]').className='on'; }catch(e){} }
     else z.querySelector('[data-z="1"]').className='on';
   }
@@ -137,7 +166,7 @@
     if(!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
       avisar('Este navegador no permite usar la cámara en vivo. Volvé a la app y usá "foto del QR".',true); enviar({error:'sin-camara'}); return;
     }
-    var hayJs=cargarJsQR();
+    var hayJs=FOTOS?Promise.resolve(true):cargarJsQR();
     var hayBD=Promise.resolve(false);
     try{ if('BarcodeDetector' in window) hayBD=(BarcodeDetector.getSupportedFormats?BarcodeDetector.getSupportedFormats():Promise.resolve(['qr_code'])).then(function(f){ if(f.indexOf('qr_code')>-1){ detector=new BarcodeDetector({formats:['qr_code']}); return true; } return false; }).catch(function(){ return false; }); }catch(e){}
     navigator.mediaDevices.getUserMedia({audio:false, video:{facingMode:{ideal:'environment'}, width:{ideal:1920}, height:{ideal:1080}}})
@@ -152,7 +181,9 @@
       .then(function(){ return Promise.all([hayJs,hayBD]); })
       .then(function(r){
         if(!r[0] && !r[1]){ avisar('No se pudo cargar el lector de QR (¿sin señal?). Volvé a la app y usá "foto del QR".',true); return; }
-        corriendo=true; avisar('Acercá el QR del remito hasta que llene el cuadro.'); leerCuadro();
+        corriendo=true;
+        if(FOTOS){ avisar('Tocá el botón blanco para cada foto. Después tocá "Listo".'); pintar(); return; }
+        avisar('Acercá el QR del remito hasta que llene el cuadro.'); leerCuadro();
       })
       .catch(function(e){
         var neg=e&&(e.name==='NotAllowedError'||e.name==='SecurityError');
@@ -167,12 +198,14 @@
   $('listo').onclick=function(){
     if(!leidos.length) return;
     apagar();
-    if(enviar({numeros:leidos.slice()})){ avisar('Enviando a la app…'); setTimeout(function(){ window.close(); },150); return; }
+    if(enviar(FOTOS?{fotos:leidos.slice()}:{numeros:leidos.slice()})){ avisar('Enviando a la app…'); setTimeout(function(){ window.close(); },FOTOS?400:150); return; }
     var sv=$('sinVentana'); sv.style.display='block';
+    if(FOTOS){ sv.innerHTML='No se pudo devolver las fotos a la app. Volvé a la app y usá <b style="font-size:15px">Subir de la galería</b>.'; avisar(''); return; }
     sv.innerHTML='No se pudo devolver a la app automáticamente. Escribí estos N° en la app:<br><b>'+leidos.join('<br>')+'</b>';
     avisar('');
   };
   window.addEventListener('pagehide',apagar);
+  if(FOTOS){ document.body.className='fotos'; document.title='Fotos de la mercadería · INCRO'; $('hTit').textContent='Fotos de la mercadería · INCRO'; $('hSub').textContent='Sacá todas las fotos seguidas; borrá con ✕ las que no sirvan.'; $('lista').style.flexWrap='nowrap'; $('lista').style.overflowX='auto'; }
   pintar();
   enviar({hola:true});
   iniciar();
